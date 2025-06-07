@@ -1,0 +1,127 @@
+#include <RH_ASK.h>
+#include <SPI.h>
+
+RH_ASK rf_driver;
+
+// Sensor pins
+#define rainVCC 7
+#define rainSensor 8
+#define microSwitch1 2
+#define microSwitch2 4
+#define FORWARD_PIN 3    // Digital pin for forward motion
+#define BACKWARD_PIN 5   // Digital pin for backward motion
+
+bool backwardMotion = false; // Flag to track backward motion
+bool backwardPressed = false; // Flag to track if backward switch is pressed
+bool stopPressed = false; // Flag to track if stop switch is pressed
+bool timerStarted = false; // Flag to track if the timer has started
+unsigned long timerStartTime; // Variable to store the start time of the timer
+const unsigned long motionChangeDelay = 60000; // Time delay in milliseconds before changing motion back to forward (1 minute)
+
+unsigned long lastDebounceTime1 = 0;  // Last time microswitch1 input was toggled
+unsigned long lastDebounceTime2 = 0;  // Last time microswitch2 input was toggled
+unsigned long debounceDelay = 50;    // Delay time in milliseconds for debouncing
+
+void setup() {
+  rf_driver.init();
+  
+  pinMode(rainVCC, OUTPUT);
+  pinMode(microSwitch1, INPUT_PULLUP); // Using internal pull-up resistors
+  pinMode(microSwitch2, INPUT_PULLUP); // Using internal pull-up resistors
+  pinMode(FORWARD_PIN, OUTPUT);   // Set forward pin as output
+  pinMode(BACKWARD_PIN, OUTPUT);  // Set backward pin as output
+
+  // Initially keep the sensor OFF
+  digitalWrite(rainVCC, LOW);
+
+  Serial.begin(9600);
+}
+
+void loop() {
+  // Get the reading from the function below and print it
+  int val = readSensor();
+  Serial.print("Digital Output: ");
+  Serial.println(val);
+
+  // Determine status of rain
+  if (val) {
+    Serial.println("Status: Clear");
+    // If it's clear, no motion is displayed
+    Serial.println();
+  } else {
+    Serial.println("Status: It's raining");
+
+    // Check the status of microswitch1 (backward motion)
+    if (digitalRead(microSwitch1) == LOW && millis() - lastDebounceTime1 > debounceDelay) {
+      // Display "Motion: Backward" while moving backward
+      Serial.println("Motion: Backward");
+      backwardMotion = true;
+      backwardPressed = true; // Set the flag indicating backward switch is pressed
+      stopPressed = false; // Reset the stop switch flag
+      timerStarted = false; // Reset the timer flag
+      lastDebounceTime1 = millis();  // Update debounce time
+      // Send backward message
+      digitalWrite(BACKWARD_PIN, HIGH);   // Activate backward motion pin
+      rf_driver.send((uint8_t *)"B", 1);  // Send backward motion message
+      rf_driver.waitPacketSent();         // Wait for the message to be sent
+    } else if (!digitalRead(microSwitch1)) {
+      backwardPressed = false; // Reset the flag indicating backward switch is not pressed
+    }
+  }
+
+  // Check the status of microswitch2 (stop)
+  if (digitalRead(microSwitch2) == LOW && millis() - lastDebounceTime2 > debounceDelay) {
+    // Display "Motion: Stop" while stop switch is pressed
+    Serial.println("Motion: Stop");
+    stopPressed = true; // Set the flag indicating stop switch is pressed
+    backwardMotion = false; // Reset the backward motion flag
+    lastDebounceTime2 = millis();  // Update debounce time
+    timerStarted = true; // Start the timer
+    timerStartTime = millis(); // Record the timer start time
+    // Send stop message
+    digitalWrite(FORWARD_PIN, LOW);    // Deactivate forward motion pin
+    digitalWrite(BACKWARD_PIN, LOW);   // Deactivate backward motion pin
+    rf_driver.send((uint8_t *)"S", 1); // Send stop motion message
+    rf_driver.waitPacketSent();        // Wait for the message to be sent
+  } else if (!digitalRead(microSwitch2)) {
+    stopPressed = false; // Reset the flag indicating stop switch is not pressed
+  }
+
+  // If stop switch is pressed, display "Motion: Stop" continuously until released
+  if (stopPressed) {
+    Serial.println("Motion: Stop");
+  } else {
+    // If backward motion is detected and stop switch is not pressed, display "Motion: Backward"
+    if (backwardMotion) {
+      Serial.println("Motion: Backward");
+    } else {
+      // If no backward motion and stop switch is not pressed, display "Motion: Forward"
+      if (!val) { // Only send motion message when it's raining
+        Serial.println("Motion: Forward");
+        // Send forward message
+        digitalWrite(FORWARD_PIN, HIGH);   // Activate forward motion pin
+        rf_driver.send((uint8_t *)"F", 1); // Send forward motion message
+        rf_driver.waitPacketSent();        // Wait for the message to be sent
+      }
+    }
+  }
+
+  // Check if timer has started and the elapsed time is greater than motionChangeDelay
+  if (timerStarted && millis() - timerStartTime > motionChangeDelay) {
+    // Reset the timer flags and display motion forward
+    backwardMotion = false;
+    stopPressed = false;
+    timerStarted = false;
+  }
+
+  delay(1000);  // Take a reading every second
+}
+
+//  This function returns the sensor output
+int readSensor() {
+  digitalWrite(rainVCC, HIGH);  // Turn the sensor ON
+  delay(10);                     // Allow power to settle
+  int val = digitalRead(rainSensor); // Read the sensor output
+  digitalWrite(rainVCC, LOW);   // Turn the sensor OFF
+  return val;                    // Return the value
+}
