@@ -84,9 +84,6 @@ elif flames[pos] == 'E':
 else:
     print('Siblings')
 
-#   Maraming salamat po sir Melvin for the past 4 days. I had some basic knowledge already pero this training 
-#      added more weapons in my arsenal, just waiting to be mastered. 
-
 
         
 
